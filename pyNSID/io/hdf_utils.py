@@ -12,11 +12,15 @@ import sys
 from warnings import warn
 import h5py
 import numpy as np
-import dask.array as da
 
-from sidpy.hdf.hdf_utils import get_attr, copy_dataset
+from sidpy.base.dict_utils import nest_dict
+# from sidpy.base.string_utils import validate_single_string_arg
+from sidpy.hdf.hdf_utils import get_attr, copy_dataset, write_simple_attrs, \
+    write_book_keeping_attrs
 from sidpy.hdf import hdf_utils as hut
 from sidpy import Dimension, Dataset
+
+from pyNSID.__version__ import version as pynsid_version
 
 if sys.version_info.major == 3:
     unicode = str
@@ -117,19 +121,17 @@ def read_h5py_dataset(dset):
         except ValueError:
             print('dimension {} not NSID type using generic'.format(dim))
 
-    dataset.attrs = dict(dset.attrs)
+    for key in dset.parent:
+        if isinstance(dset.parent[key], h5py.Group):
+            if key[0] != '_':
+                setattr(dataset, key, nest_dict(dset.parent[key].attrs))
 
-    dataset.original_metadata = {}
-    if 'original_metadata' in dset.parent:
-        dataset.original_metadata = dict(dset.parent['original_metadata'].attrs)
-
-    # hdf5 information
-    dataset.h5_file = dset.file
+    dataset.h5_dataset = dset
     dataset.h5_filename = dset.file.filename
     try:
-        dataset.h5_dataset = dset.name
+        dataset.h5_dataset_name = dset.name
     except ValueError:
-        pass
+        dataset.h5_dataset_name = ''
     return dataset
 
 
@@ -207,10 +209,10 @@ def check_if_main(h5_main, verbose=False):
 
     # Check for Datasets
 
-    attrs_names = ['dimension_type', 'name', 'nsid_version', 'quantity', 'units', ]
-    attr_success = []
+    attrs_names = ['dimension_type', 'name', 'quantity', 'units']
+
     # Check for all required attributes in dataset
-    main_attrs_names = ['quantity', 'units', 'main_data_name', 'data_type', 'modality', 'source']
+    main_attrs_names = ['quantity', 'units', 'main_data_name', 'pyNSID_version', 'data_type', 'modality', 'source']
     main_attr_success = np.all([att in h5_main.attrs for att in main_attrs_names])
     if verbose:
         print('All Attributes in dataset: ', main_attr_success)
@@ -233,6 +235,7 @@ def check_if_main(h5_main, verbose=False):
     for i, dimension in enumerate(h5_main.dims):
         # check for all required attributes
         h5_dim_dset = h5_group[dimension.label]
+
         attr_success.append(np.all([att in h5_dim_dset.attrs for att in attrs_names]))
         dset_success.append(np.all([attr_success, isinstance(h5_dim_dset, h5py.Dataset)]))
         # dimensional scale has to be 1D
@@ -457,3 +460,19 @@ def validate_main_and_dims(main_shape, dim_dict, h5_parent_group):
                 print(dim_name, ' is not unique')
 
     return all(dimensions_correct)
+
+
+def write_pynsid_book_keeping_attrs(h5_object):
+    """
+    Writes book-keeping information to the HDF5 object
+
+    Parameters
+    ----------
+    h5_object
+
+    Returns
+    -------
+
+    """
+    write_book_keeping_attrs(h5_object)
+    write_simple_attrs(h5_object, {'pyNSID_version': pynsid_version})
